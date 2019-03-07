@@ -23,6 +23,8 @@ class Captcha_Plugin implements Typecho_Plugin_Interface
     public static function activate()
 	{
 		Typecho_Plugin::factory('Widget_Feedback')->comment = array(__CLASS__, 'filter');
+		Typecho_Plugin::factory('Widget_Archive')->header = array(__CLASS__, 'header');
+		Typecho_Plugin::factory('Widget_Archive')->footer = array(__CLASS__, 'footer');
     }
     
     /**
@@ -52,36 +54,65 @@ class Captcha_Plugin implements Typecho_Plugin_Interface
      */
 	public static function config(Typecho_Widget_Helper_Form $form)
 	{
-		$form->addInput(new Typecho_Widget_Helper_Form_Element_Text('client', null, '', _t('Client Key:'),
-			_t("To use Captcha you must get an API key from <a href='https://www.google.com/recaptcha/admin/create'>https://www.google.com/recaptcha/admin/create</a>")));
-
-		$form->addInput(new Typecho_Widget_Helper_Form_Element_Text('server', null, '', _t('Server Key:'), _t('')));
-		$form->addInput(new Typecho_Widget_Helper_Form_Element_Text('api', null, 'https://www.recaptcha.net', _t('Api Endpoint:'), _t('')));
-		$form->addInput(new Typecho_Widget_Helper_Form_Element_Text('input', null, 'captcha', _t('Captcha Input Id'), _t('')));
+		$form->addInput(new Typecho_Widget_Helper_Form_Element_Text('client', null, '', _t('前端Key:'),
+			_t('<a href="//www.google.com/recaptcha/admin/create" target="_blank">点击申请</a>')));
+		$form->addInput(new Typecho_Widget_Helper_Form_Element_Text('server', null, '', _t('后端Key:'), _t('')));
+		$form->addInput(new Typecho_Widget_Helper_Form_Element_Text('api', null, 'https://www.recaptcha.net', _t('Api接入点:'), _t('国内建议使用：https://www.recaptcha.net')));
+		$form->addInput(new Typecho_Widget_Helper_Form_Element_Text('input', null, 'captcha', _t('验证码id'), _t('用于提交验证token的字段名，如遇参数冲突可以修改')));
 		$form->addInput(new Typecho_Widget_Helper_Form_Element_Select('action', array(
 			'homepage' => _t('首页'),
 			'login' => _t('登录'),
 			'social' => _t('社交'),
 			'e-commerce' => _t('电商'),
-			), 'social', _t('评分场景'), _t('')));
+			), 'social', _t('评分场景'), _t('<a href="//developers.google.com/recaptcha/docs/v3#score" target="_blank">详情</a>')));
+		$form->addInput(new Typecho_Widget_Helper_Form_Element_Radio('hidden', array(_t('展示'), _t('隐藏')), 0, _t('隐藏部件'), _t('是否隐藏隐私申明')));
 	}
 
 	/**
-	 * 输出验证码
+	 * @return bool
+	 * @throws Typecho_Exception
+	 */
+	private static function canRender()
+	{
+		$archive = Typecho_Widget::widget('Widget_Archive');
+		return in_array($archive->getArchiveType(), array('post', 'page'))
+			&& $archive->allow('comment')
+			&& !Typecho_Widget::widget('Widget_User')->hasLogin();
+	}
+
+	/**
+	 * 头部输出
 	 *
 	 * @throws Typecho_Exception
 	 */
-	public static function output()
+	public static function header()
 	{
 		$api = Typecho_Widget::widget('Widget_Options')->plugin('Captcha')->api;
 		$client = Typecho_Widget::widget('Widget_Options')->plugin('Captcha')->client;
-		$input = Typecho_Widget::widget('Widget_Options')->plugin('Captcha')->input;
-		$action = Typecho_Widget::widget('Widget_Options')->plugin('Captcha')->action;
-		if ($client) {
-			printf('<script src="%s/recaptcha/api.js?render=%s"></script><script>grecaptcha.ready(function() { grecaptcha.execute("%s", {action: "%s"}).then(function(token) { document.getElementById("%s").value = token; });});</script><input type="hidden" id="%s" name="%s" value="" />',
-				$api, $client, $client, $action, $input, $input, $input
-			);
+		$hidden = Typecho_Widget::widget('Widget_Options')->plugin('Captcha')->hidden;
+		if (!$api || !$client || !static::canRender()) {
+			return;
 		}
+		printf('<script src="%s/recaptcha/api.js?render=%s"></script>', $api, $client);
+		if ($hidden) {
+			printf('<style type="text/css">.grecaptcha-badge {display: none !important;}</style>');
+		}
+	}
+
+	/**
+	 * 尾部输出
+	 *
+	 * @throws Typecho_Exception
+	 */
+	public static function footer()
+	{
+		$client = Typecho_Widget::widget('Widget_Options')->plugin('Captcha')->client;
+		$action = Typecho_Widget::widget('Widget_Options')->plugin('Captcha')->action;
+		$input = Typecho_Widget::widget('Widget_Options')->plugin('Captcha')->input;
+		if (!$client || !static::canRender()) {
+			return;
+		}
+		printf('<script>grecaptcha.ready(function() { grecaptcha.execute("%s", {action: "%s"}).then(function(token) { var input = document.createElement("input"); input.id = input.name="%s"; input.type="hidden"; input.value=token; if (document.getElementById("textarea")) { document.getElementById("textarea").parentNode.appendChild(input) ;} });});</script>', $client, $action, $input);
 	}
 
 	/**
@@ -93,7 +124,8 @@ class Captcha_Plugin implements Typecho_Plugin_Interface
 	 * @throws Typecho_Exception
 	 * @throws Typecho_Widget_Exception
 	 */
-	public static function filter($comment, Typecho_Widget $post) {
+	public static function filter($comment, Typecho_Widget $post)
+	{
 		$user = $post->widget('Widget_User');
 		if($user->hasLogin()) {
 			return $comment;
